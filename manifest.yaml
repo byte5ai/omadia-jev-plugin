@@ -3,7 +3,7 @@ schema_version: "1"
 identity:
   id: "@omadia/decision-jev"
   name: "Jev Decision Model (TypeSafe AI)"
-  version: "0.1.0"
+  version: "0.1.1"
   kind: "extension"
   domain: "core.decision"
   description:
@@ -52,10 +52,10 @@ setup:
         en: "Jev model"
         de: "Jev-Modell"
       help:
-        en: "Pinned model version. The fast path's confidence thresholds are tuned per version, so change it deliberately. Default: jev/jev-1.13.0"
-        de: "Fest gepinnte Modellversion. Die Konfidenz-Schwellen des Schnellpfads gelten pro Version — bewusst ändern. Standard: jev/jev-1.13.0"
+        en: "Pinned model version as TypeSafe names it (jev-1.14.0, jev-1.13.0, or the moving alias jev-latest). A gateway prefix like jev/ is dropped for api.typesafe.ai. The fast path's confidence thresholds are tuned per version, so change it deliberately. Default: jev-1.14.0"
+        de: "Fest gepinnte Modellversion in TypeSafes Schreibweise (jev-1.14.0, jev-1.13.0 oder der wandernde Alias jev-latest). Ein Gateway-Präfix wie jev/ entfällt für api.typesafe.ai. Die Konfidenz-Schwellen des Schnellpfads gelten pro Version — bewusst ändern. Standard: jev-1.14.0"
       required: false
-      default: "jev/jev-1.13.0"
+      default: "jev-1.14.0"
     - key: "jev_timeout_ms"
       type: "integer"
       label:

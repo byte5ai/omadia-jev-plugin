@@ -94,15 +94,76 @@ export function retryAfterMs(header: string | null, now = Date.now()): number | 
   return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
 }
 
+function apiBase(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+}
+
 /** The System One endpoint for a base URL with or without `/v1`. */
 export function endpointUrl(baseUrl: string): string {
-  const base = baseUrl.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
-  return `${base}/v1/systemone`;
+  return `${apiBase(baseUrl)}/v1/systemone`;
+}
+
+/** The model-list endpoint (`GET /v1/models`). */
+export function modelsUrl(baseUrl: string): string {
+  return `${apiBase(baseUrl)}/v1/models`;
+}
+
+/**
+ * The model name the endpoint expects. TypeSafe's own API names models
+ * `jev-1.14.0` / `jev-latest`; gateways (OpenRouter, Zuplo, LiteLLM) prefix
+ * the vendor (`jev/jev-1.14.0`). Against api.typesafe.ai the prefix is
+ * stripped — the direct API answers it with HTTP 400.
+ */
+export function effectiveModel(baseUrl: string, model: string): string {
+  const trimmed = model.trim();
+  let host = '';
+  try {
+    host = new URL(apiBase(baseUrl)).hostname;
+  } catch {
+    return trimmed;
+  }
+  return host === 'api.typesafe.ai' ? trimmed.replace(/^(jev|typesafe(-ai)?)\//, '') : trimmed;
+}
+
+/**
+ * A short, content-free reason of a 4xx body for the logs: the API's
+ * `error_type` and, for validation errors, the offending field paths — never
+ * a message text (it may quote the request).
+ */
+export function errorReason(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined;
+  const detail = (body as Record<string, unknown>)['detail'];
+  if (Array.isArray(detail)) {
+    const locs = detail
+      .map((d) => (typeof d === 'object' && d !== null ? (d as Record<string, unknown>)['loc'] : undefined))
+      .filter(Array.isArray)
+      .map((loc) => (loc as unknown[]).filter((p) => typeof p === 'string' || typeof p === 'number').join('.'))
+      .slice(0, 3);
+    return locs.length > 0 ? `invalid ${locs.join(', ')}` : undefined;
+  }
+  if (typeof detail === 'object' && detail !== null) {
+    const type = (detail as Record<string, unknown>)['error_type'] ?? (detail as Record<string, unknown>)['type'];
+    return typeof type === 'string' ? type.slice(0, 60) : undefined;
+  }
+  return undefined;
+}
+
+/** The model names the account may use (`GET /v1/models`). */
+export async function listModels(opts: Pick<JevClientOptions, 'baseUrl' | 'apiKey' | 'timeoutMs' | 'fetch'>): Promise<string[]> {
+  const doFetch = opts.fetch ?? fetch;
+  const res = await doFetch(modelsUrl(opts.baseUrl), {
+    headers: { Authorization: `Bearer ${opts.apiKey}` },
+    signal: AbortSignal.timeout(Math.max(opts.timeoutMs, 5000)),
+  });
+  if (!res.ok) throw new JevError(`HTTP ${res.status}`, res.status);
+  const body = (await res.json()) as { models?: Array<{ name?: unknown }> };
+  return (body.models ?? []).map((m) => m.name).filter((n): n is string => typeof n === 'string');
 }
 
 export function createJevClient(opts: JevClientOptions): { choose(req: DecisionChoiceRequest): Promise<JevCallResult> } {
   const doFetch = opts.fetch ?? fetch;
   const url = endpointUrl(opts.baseUrl);
+  const model = effectiveModel(opts.baseUrl, opts.model);
   return {
     async choose(req) {
       const timeout = AbortSignal.timeout(opts.timeoutMs);
@@ -112,15 +173,25 @@ export function createJevClient(opts: JevClientOptions): { choose(req: DecisionC
         res = await doFetch(url, {
           method: 'POST',
           headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildRequestBody(req, opts.model)),
+          body: JSON.stringify(buildRequestBody(req, model)),
           signal,
         });
       } catch (err) {
         throw new JevError(`request failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       if (!res.ok) {
-        // never echo the body: it may quote the request
-        throw new JevError(`HTTP ${res.status}`, res.status, retryAfterMs(res.headers.get('retry-after')));
+        // never echo the body's text: it may quote the request
+        let reason: string | undefined;
+        try {
+          reason = errorReason(await res.json());
+        } catch {
+          reason = undefined;
+        }
+        throw new JevError(
+          `HTTP ${res.status}${reason !== undefined ? ` (${reason})` : ''}`,
+          res.status,
+          retryAfterMs(res.headers.get('retry-after')),
+        );
       }
       let body: unknown;
       try {

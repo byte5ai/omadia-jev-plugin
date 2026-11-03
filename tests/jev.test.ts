@@ -4,7 +4,9 @@ import { describe, it } from 'node:test';
 import {
   buildRequestBody,
   createJevClient,
+  effectiveModel,
   endpointUrl,
+  errorReason,
   JevError,
   parseChoiceAnswer,
   retryAfterMs,
@@ -59,6 +61,19 @@ describe('System One mapping', () => {
         },
       },
     });
+  });
+
+  it('the direct API gets TypeSafe model names; a gateway keeps its prefix', () => {
+    assert.equal(effectiveModel('https://api.typesafe.ai', 'jev/jev-1.13.0'), 'jev-1.13.0');
+    assert.equal(effectiveModel('https://api.typesafe.ai/v1', 'jev-latest'), 'jev-latest');
+    assert.equal(effectiveModel('https://openrouter.ai/api', 'jev/jev-1.13.0'), 'jev/jev-1.13.0');
+    assert.equal(DEFAULT_MODEL, 'jev-1.14.0');
+  });
+
+  it('4xx reasons are content-free: error_type or field paths, never message text', () => {
+    assert.equal(errorReason({ detail: { error_type: 'invalid_model', message: 'echo USER TURN' } }), 'invalid_model');
+    assert.equal(errorReason({ detail: [{ loc: ['body', 'questions', 'decision', 'criteria'], msg: 'USER TURN' }] }), 'invalid body.questions.decision.criteria');
+    assert.equal(errorReason({ detail: 'free text USER TURN' }), undefined);
   });
 
   it('endpoint with or without /v1 and trailing slashes', () => {
@@ -237,12 +252,42 @@ describe('activation', () => {
     assert.match(c.logs[0] ?? '', /no jev_api_key/);
   });
 
+  async function withModels<T>(names: string[], run: () => Promise<T>): Promise<T> {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ models: names.map((name) => ({ name })) }), { status: 200 })) as typeof fetch;
+    try {
+      return await run();
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+
   it('with a key: publishes decisionModel with provider jev; the key is never logged', async () => {
     const c = ctx('secret-key-123', { jev_tasks: 'fast-path.gate' });
-    await activate(c.ctx);
+    await withModels(['jev-latest', 'jev-1.14.0'], async () => {
+      await activate(c.ctx);
+      await settle();
+    });
     assert.equal(c.provided[0]?.name, 'decisionModel');
     assert.equal((c.provided[0]?.impl as DecisionModelService).provider, 'jev');
-    assert.match(c.logs[0] ?? '', /model=jev\/jev-1\.13\.0 .* tasks=fast-path\.gate/);
+    assert.match(c.logs[0] ?? '', /model=jev-1\.14\.0 .* tasks=fast-path\.gate/);
+    assert.ok(c.logs.some((m) => m.includes('model jev-1.14.0 available')));
     assert.doesNotMatch(c.logs.join('\n'), /secret-key-123/);
+  });
+
+  it('a stored gateway-style model name is corrected; an unknown one is warned about at activation', async () => {
+    const legacy = ctx('k', { jev_model: 'jev/jev-1.13.0' });
+    await withModels(['jev-1.13.0'], async () => {
+      await activate(legacy.ctx);
+      await settle();
+    });
+    assert.match(legacy.logs[0] ?? '', /model=jev-1\.13\.0 /);
+    const unknown = ctx('k', { jev_model: 'jev-9.9.9' });
+    await withModels(['jev-latest', 'jev-1.14.0'], async () => {
+      await activate(unknown.ctx);
+      await settle();
+    });
+    assert.ok(unknown.logs.some((m) => /WARNING model jev-9\.9\.9 is not available .* jev-latest, jev-1\.14\.0/.test(m)));
   });
 });

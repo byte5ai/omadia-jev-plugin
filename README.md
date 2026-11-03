@@ -18,7 +18,7 @@ Requires omadia with `@omadia/plugin-api` >= 1.52.0 and `@omadia/fast-path` >= 0
 |---|---|---|
 | `jev_api_key` | — | TypeSafe API key (vault). Without it the plugin decides nothing. |
 | `jev_base_url` | `https://api.typesafe.ai` | Or a gateway (OpenRouter, LiteLLM, Zuplo), with or without `/v1`. |
-| `jev_model` | `jev/jev-1.13.0` | Pinned on purpose. The fast path's thresholds are tuned per version. |
+| `jev_model` | `jev-1.14.0` | Pinned on purpose. The fast path's thresholds are tuned per version. A gateway prefix (`jev/`) is dropped for api.typesafe.ai. |
 | `jev_timeout_ms` | `1500` | Keep it below the fast path's 2 s deadline. |
 | `jev_tasks` | `all` | `fast-path.gate`, `fast-path.source`, `fast-path.direct-plan`. Start with `fast-path.gate` for a careful rollout. |
 

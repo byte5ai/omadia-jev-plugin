@@ -1,5 +1,5 @@
 import { DECISION_MODEL_SERVICE_NAME, type JevPluginContext } from './contract.js';
-import { createJevClient } from './jevClient.js';
+import { createJevClient, effectiveModel, listModels } from './jevClient.js';
 import { createJevDecisionService, PROVIDER_ID } from './service.js';
 
 /**
@@ -12,7 +12,7 @@ import { createJevDecisionService, PROVIDER_ID } from './service.js';
  */
 
 export const DEFAULT_BASE_URL = 'https://api.typesafe.ai';
-export const DEFAULT_MODEL = 'jev/jev-1.13.0';
+export const DEFAULT_MODEL = 'jev-1.14.0';
 /** below the fast path's 2 s decision deadline */
 export const DEFAULT_TIMEOUT_MS = 1500;
 
@@ -35,8 +35,8 @@ export async function activate(ctx: JevPluginContext): Promise<JevPluginHandle> 
     ctx.log('[decision-jev] no jev_api_key in the vault — active, but no decision model published (fast path keeps its LLM router)');
     return { close: () => Promise.resolve() };
   }
-  const model = text(ctx.config.get<unknown>('jev_model'), DEFAULT_MODEL);
   const baseUrl = text(ctx.config.get<unknown>('jev_base_url'), DEFAULT_BASE_URL);
+  const model = effectiveModel(baseUrl, text(ctx.config.get<unknown>('jev_model'), DEFAULT_MODEL));
   const timeoutMs = positiveInt(ctx.config.get<unknown>('jev_timeout_ms'), DEFAULT_TIMEOUT_MS);
   const tasks = text(ctx.config.get<unknown>('jev_tasks'), 'all');
   const service = createJevDecisionService({
@@ -46,6 +46,19 @@ export async function activate(ctx: JevPluginContext): Promise<JevPluginHandle> 
   });
   const dispose = ctx.services.provide(DECISION_MODEL_SERVICE_NAME, service);
   ctx.log(`[decision-jev] ${PROVIDER_ID} published: model=${model} base=${baseUrl} timeout=${timeoutMs}ms tasks=${tasks}`);
+  // one content-free check at activation: is the model available to this
+  // key? A wrong name otherwise shows only as HTTP 400 on every turn.
+  void listModels({ baseUrl, apiKey, timeoutMs })
+    .then((names) => {
+      if (names.length > 0 && !names.includes(model)) {
+        ctx.log(`[decision-jev] WARNING model ${model} is not available to this key — available: ${names.join(', ')}`);
+      } else {
+        ctx.log(`[decision-jev] model ${model} available`);
+      }
+    })
+    .catch((err: unknown) => {
+      ctx.log(`[decision-jev] model check failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   return {
     close(): Promise<void> {
       dispose();
