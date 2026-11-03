@@ -7,6 +7,7 @@ import {
   effectiveModel,
   endpointUrl,
   errorReason,
+  fallbackModel,
   JevError,
   parseChoiceAnswer,
   retryAfterMs,
@@ -61,6 +62,13 @@ describe('System One mapping', () => {
         },
       },
     });
+  });
+
+  it('fallbackModel: the stable alias, else the first listed; none when available', () => {
+    assert.equal(fallbackModel('jev-1.13.0', ['jev-latest', 'jev-preview']), 'jev-latest');
+    assert.equal(fallbackModel('jev-1.13.0', ['jev-x']), 'jev-x');
+    assert.equal(fallbackModel('jev-latest', ['jev-latest']), undefined);
+    assert.equal(fallbackModel('jev-1.13.0', []), undefined);
   });
 
   it('the direct API gets TypeSafe model names; a gateway keeps its prefix', () => {
@@ -288,6 +296,27 @@ describe('activation', () => {
       await activate(unknown.ctx);
       await settle();
     });
-    assert.ok(unknown.logs.some((m) => /WARNING model jev-9\.9\.9 is not available .* jev-latest, jev-1\.14\.0/.test(m)));
+    assert.ok(unknown.logs.some((m) => /WARNING model jev-9\.9\.9 is not available .*jev-latest, jev-1\.14\.0.* using jev-latest/.test(m)));
+  });
+
+  it('an alias-only key: the next call uses jev-latest instead of the unavailable pinned model', async () => {
+    const c = ctx('k', { jev_model: 'jev/jev-1.13.0' });
+    const bodies: Array<Record<string, unknown>> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/v1/models')) {
+        return new Response(JSON.stringify({ models: [{ name: 'jev-latest' }, { name: 'jev-preview' }] }), { status: 200 });
+      }
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify(OK_BODY), { status: 200 });
+    }) as typeof fetch;
+    try {
+      await activate(c.ctx);
+      await settle();
+      await (c.provided[0]?.impl as DecisionModelService).choose(REQ);
+    } finally {
+      globalThis.fetch = original;
+    }
+    assert.equal(bodies[0]?.['model'], 'jev-latest');
   });
 });

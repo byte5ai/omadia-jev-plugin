@@ -26,7 +26,8 @@ export class JevError extends Error {
 export interface JevClientOptions {
   baseUrl: string;
   apiKey: string;
-  model: string;
+  /** a name, or a getter — the activation check may switch it later */
+  model: string | (() => string);
   timeoutMs: number;
   /** test seam */
   fetch?: typeof fetch;
@@ -149,6 +150,13 @@ export function errorReason(body: unknown): string | undefined {
 }
 
 /** The model names the account may use (`GET /v1/models`). */
+/** The model to use when `wanted` is not available to the key: the moving
+ *  stable alias, else the first listed name; undefined when `wanted` is. */
+export function fallbackModel(wanted: string, available: readonly string[]): string | undefined {
+  if (available.length === 0 || available.includes(wanted)) return undefined;
+  return available.includes('jev-latest') ? 'jev-latest' : available[0];
+}
+
 export async function listModels(opts: Pick<JevClientOptions, 'baseUrl' | 'apiKey' | 'timeoutMs' | 'fetch'>): Promise<string[]> {
   const doFetch = opts.fetch ?? fetch;
   const res = await doFetch(modelsUrl(opts.baseUrl), {
@@ -163,7 +171,7 @@ export async function listModels(opts: Pick<JevClientOptions, 'baseUrl' | 'apiKe
 export function createJevClient(opts: JevClientOptions): { choose(req: DecisionChoiceRequest): Promise<JevCallResult> } {
   const doFetch = opts.fetch ?? fetch;
   const url = endpointUrl(opts.baseUrl);
-  const model = effectiveModel(opts.baseUrl, opts.model);
+  const modelOf = (): string => effectiveModel(opts.baseUrl, typeof opts.model === 'function' ? opts.model() : opts.model);
   return {
     async choose(req) {
       const timeout = AbortSignal.timeout(opts.timeoutMs);
@@ -173,7 +181,7 @@ export function createJevClient(opts: JevClientOptions): { choose(req: DecisionC
         res = await doFetch(url, {
           method: 'POST',
           headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildRequestBody(req, model)),
+          body: JSON.stringify(buildRequestBody(req, modelOf())),
           signal,
         });
       } catch (err) {

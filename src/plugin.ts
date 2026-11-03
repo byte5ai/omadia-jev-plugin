@@ -1,5 +1,5 @@
 import { DECISION_MODEL_SERVICE_NAME, type JevPluginContext } from './contract.js';
-import { createJevClient, effectiveModel, listModels } from './jevClient.js';
+import { createJevClient, effectiveModel, fallbackModel, listModels } from './jevClient.js';
 import { createJevDecisionService, PROVIDER_ID } from './service.js';
 
 /**
@@ -36,25 +36,31 @@ export async function activate(ctx: JevPluginContext): Promise<JevPluginHandle> 
     return { close: () => Promise.resolve() };
   }
   const baseUrl = text(ctx.config.get<unknown>('jev_base_url'), DEFAULT_BASE_URL);
-  const model = effectiveModel(baseUrl, text(ctx.config.get<unknown>('jev_model'), DEFAULT_MODEL));
+  const configured = effectiveModel(baseUrl, text(ctx.config.get<unknown>('jev_model'), DEFAULT_MODEL));
+  let model = configured;
   const timeoutMs = positiveInt(ctx.config.get<unknown>('jev_timeout_ms'), DEFAULT_TIMEOUT_MS);
   const tasks = text(ctx.config.get<unknown>('jev_tasks'), 'all');
   const service = createJevDecisionService({
-    client: createJevClient({ baseUrl, apiKey, model, timeoutMs }),
+    client: createJevClient({ baseUrl, apiKey, model: () => model, timeoutMs }),
     tasks,
     log: (m) => ctx.log(m),
   });
   const dispose = ctx.services.provide(DECISION_MODEL_SERVICE_NAME, service);
   ctx.log(`[decision-jev] ${PROVIDER_ID} published: model=${model} base=${baseUrl} timeout=${timeoutMs}ms tasks=${tasks}`);
   // one content-free check at activation: is the model available to this
-  // key? A wrong name otherwise shows only as HTTP 400 on every turn.
+  // key? A wrong name otherwise fails every turn with HTTP 400 — so switch
+  // to the stable alias (accounts may only see aliases) and say so.
   void listModels({ baseUrl, apiKey, timeoutMs })
     .then((names) => {
-      if (names.length > 0 && !names.includes(model)) {
-        ctx.log(`[decision-jev] WARNING model ${model} is not available to this key — available: ${names.join(', ')}`);
-      } else {
-        ctx.log(`[decision-jev] model ${model} available`);
+      const fallback = fallbackModel(configured, names);
+      if (fallback === undefined) {
+        ctx.log(`[decision-jev] model ${configured} available`);
+        return;
       }
+      model = fallback;
+      ctx.log(
+        `[decision-jev] WARNING model ${configured} is not available to this key (available: ${names.join(', ')}) — using ${fallback}`,
+      );
     })
     .catch((err: unknown) => {
       ctx.log(`[decision-jev] model check failed: ${err instanceof Error ? err.message : String(err)}`);

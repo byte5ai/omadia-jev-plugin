@@ -3,7 +3,7 @@ schema_version: "1"
 identity:
   id: "@omadia/decision-jev"
   name: "Jev Decision Model (TypeSafe AI)"
-  version: "0.1.1"
+  version: "0.1.2"
   kind: "extension"
   domain: "core.decision"
   description:
