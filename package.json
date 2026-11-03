@@ -1,0 +1,39 @@
+{
+  "name": "@omadia/decision-jev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "description": "TypeSafe Jev as the omadia decision model (decisionModel@1): the fast path decides model yes/no, the data source and learned queries before any language-model call.",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "package": "node scripts/build-zip.mjs",
+    "clean": "rm -rf dist out .test-build *.tsbuildinfo",
+    "test": "node scripts/test.mjs"
+  },
+  "peerDependencies": {
+    "@omadia/plugin-api": ">=1.52.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^6.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "homepage": "https://github.com/byte5ai/omadia-jev-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/byte5ai/omadia-jev-plugin.git"
+  }
+}

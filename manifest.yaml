@@ -1,0 +1,102 @@
+schema_version: "1"
+
+identity:
+  id: "@omadia/decision-jev"
+  name: "Jev Decision Model (TypeSafe AI)"
+  version: "0.1.0"
+  kind: "extension"
+  domain: "core.decision"
+  description:
+    en: "Decides every chat message before any language-model call, with TypeSafe AI's Jev: does it need a model at all, or does one data source (plugin, API or MCP tool) answer it — and does a learned query fit as stored? Simple lookups then run without a model; everything else goes straight to the agent. Faster and cheaper than the model check of the fast path; any failure falls back to it."
+    de: "Entscheidet jede Chat-Nachricht vor jedem Sprachmodell-Aufruf, mit Jev von TypeSafe AI: Braucht sie überhaupt ein Modell, oder beantwortet sie eine Datenquelle (Plugin-, API- oder MCP-Tool) — und passt eine gelernte Abfrage unverändert? Einfache Abfragen laufen dann ohne Modell; alles andere geht direkt an den Agenten. Schneller und günstiger als die Modellprüfung des Schnellpfads; bei jedem Fehler übernimmt diese."
+  authors:
+    - name: "byte5 GmbH"
+      email: "info@omadia.ai"
+      url: "https://omadia.ai"
+  license: "MIT"
+  categories:
+    - "infrastructure"
+    - "ml"
+
+compat:
+  core: ">=1.0 <2.0"
+  node: ">=20"
+
+lifecycle:
+  entry: "dist/plugin.js"
+
+setup:
+  fields:
+    - key: "jev_api_key"
+      type: "secret"
+      label:
+        en: "TypeSafe API key"
+        de: "TypeSafe-API-Key"
+      help:
+        en: "API key of your TypeSafe account (or of the gateway set as base URL). Stored in the vault. Without a key the plugin stays active but decides nothing — the fast path keeps its model check. PRIVACY: the chat message goes to TypeSafe, after the Privacy Shield masked it when one runs; never tool results or rows."
+        de: "API-Key Ihres TypeSafe-Kontos (oder des als Basis-URL gesetzten Gateways). Liegt im Vault. Ohne Key bleibt das Plugin aktiv, entscheidet aber nichts — der Schnellpfad behält seine Modellprüfung. DATENSCHUTZ: Die Chat-Nachricht geht an TypeSafe, maskiert durch den Privacy Shield, sofern er läuft; nie Tool-Ergebnisse oder Datenzeilen."
+      required: false
+    - key: "jev_base_url"
+      type: "string"
+      label:
+        en: "Base URL"
+        de: "Basis-URL"
+      help:
+        en: "TypeSafe API or a gateway in front of it (OpenRouter, LiteLLM, Zuplo), with or without /v1. Default: https://api.typesafe.ai"
+        de: "TypeSafe-API oder ein vorgeschaltetes Gateway (OpenRouter, LiteLLM, Zuplo), mit oder ohne /v1. Standard: https://api.typesafe.ai"
+      required: false
+      default: "https://api.typesafe.ai"
+    - key: "jev_model"
+      type: "string"
+      label:
+        en: "Jev model"
+        de: "Jev-Modell"
+      help:
+        en: "Pinned model version. The fast path's confidence thresholds are tuned per version, so change it deliberately. Default: jev/jev-1.13.0"
+        de: "Fest gepinnte Modellversion. Die Konfidenz-Schwellen des Schnellpfads gelten pro Version — bewusst ändern. Standard: jev/jev-1.13.0"
+      required: false
+      default: "jev/jev-1.13.0"
+    - key: "jev_timeout_ms"
+      type: "integer"
+      label:
+        en: "Timeout (ms)"
+        de: "Timeout (ms)"
+      help:
+        en: "Per decision. Past it the fast path uses its model check. Keep it below 2000 (the fast path's own deadline). Default: 1500"
+        de: "Pro Entscheidung. Danach nutzt der Schnellpfad seine Modellprüfung. Unter 2000 halten (eigene Frist des Schnellpfads). Standard: 1500"
+      required: false
+      default: 1500
+    - key: "jev_tasks"
+      type: "string"
+      label:
+        en: "Decisions Jev makes"
+        de: "Entscheidungen durch Jev"
+      help:
+        en: "Comma-separated: fast-path.gate (model yes/no), fast-path.source (which data source), fast-path.direct-plan (run a learned query as stored), or all. For a careful rollout start with fast-path.gate. Default: all"
+        de: "Kommagetrennt: fast-path.gate (Modell ja/nein), fast-path.source (welche Datenquelle), fast-path.direct-plan (gelernte Abfrage unverändert ausführen) oder all. Für einen vorsichtigen Start: fast-path.gate. Standard: all"
+      required: false
+      default: "all"
+
+permissions:
+  memory:
+    reads: []
+    writes: []
+  graph:
+    reads: []
+    writes: []
+  network:
+    outbound:
+      - "typesafe-jev"
+  filesystem:
+    scratch: false
+
+integrations:
+  - id: "typesafe_jev_systemone"
+    kind: "http"
+    target: "POST {jev_base_url}/v1/systemone"
+    auth_from: "jev_api_key"
+    docs: "https://docs.typesafe.ai"
+
+provides:
+  - "decisionModel@1"
+requires: []
