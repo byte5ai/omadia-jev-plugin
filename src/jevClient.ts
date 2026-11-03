@@ -1,4 +1,10 @@
-import type { DecisionChoiceRequest, DecisionChoiceResult } from './contract.js';
+import type {
+  DecisionAnswer,
+  DecisionBatchRequest,
+  DecisionBatchResult,
+  DecisionChoiceRequest,
+  DecisionChoiceResult,
+} from './contract.js';
 
 /**
  * TypeSafe Jev — System One HTTP API (`POST {base}/v1/systemone`).
@@ -51,6 +57,46 @@ export function buildRequestBody(req: DecisionChoiceRequest, model: string): Rec
 
 function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
+}
+
+/** The System One body of a batch: `choice` → Choice, `yesno` → Noul. */
+export function buildBatchBody(req: DecisionBatchRequest, model: string): Record<string, unknown> {
+  const questions: Record<string, unknown> = {};
+  for (const [id, q] of Object.entries(req.questions)) {
+    if (q.kind === 'yesno') {
+      questions[id] = { type: 'noul', instructions: q.instruction };
+    } else {
+      const criteria: Record<string, string> = {};
+      for (const o of q.options) criteria[o.id] = o.description;
+      questions[id] = { type: 'choice', instructions: q.instruction, criteria };
+    }
+  }
+  return { model, state: req.input, questions };
+}
+
+/** The answers of a batch response, each validated against its question;
+ *  an invalid or missing answer is left out (the caller decides without it). */
+export function parseBatchAnswers(req: Pick<DecisionBatchRequest, 'questions'>, body: unknown): DecisionBatchResult {
+  const root = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+  const answers = typeof root['answers'] === 'object' && root['answers'] !== null ? (root['answers'] as Record<string, unknown>) : {};
+  const out: Record<string, DecisionAnswer> = {};
+  for (const [id, q] of Object.entries(req.questions)) {
+    const a = answers[id];
+    if (typeof a !== 'object' || a === null) continue;
+    if (q.kind === 'yesno') {
+      const p = (a as Record<string, unknown>)['noul'];
+      if (typeof p === 'number' && Number.isFinite(p)) out[id] = { kind: 'yesno', probability: clamp01(p) };
+      continue;
+    }
+    try {
+      const c = parseChoiceAnswer(q, { answers: { [QUESTION_KEY]: a } });
+      out[id] = { kind: 'choice', choice: c.choice, confidence: c.confidence, ...(c.probabilities ? { probabilities: c.probabilities } : {}) };
+    } catch {
+      // an invalid choice answer is dropped, never guessed
+    }
+  }
+  const model = root['model'];
+  return { answers: out, ...(typeof model === 'string' && model.length > 0 ? { model } : {}) };
 }
 
 /** The choice answer of a System One response, validated against `req`. */
@@ -168,48 +214,67 @@ export async function listModels(opts: Pick<JevClientOptions, 'baseUrl' | 'apiKe
   return (body.models ?? []).map((m) => m.name).filter((n): n is string => typeof n === 'string');
 }
 
-export function createJevClient(opts: JevClientOptions): { choose(req: DecisionChoiceRequest): Promise<JevCallResult> } {
+export interface JevBatchCallResult extends DecisionBatchResult {
+  costUsd?: number;
+}
+
+export interface JevClient {
+  choose(req: DecisionChoiceRequest): Promise<JevCallResult>;
+  decideAll(req: DecisionBatchRequest): Promise<JevBatchCallResult>;
+}
+
+export function createJevClient(opts: JevClientOptions): JevClient {
   const doFetch = opts.fetch ?? fetch;
   const url = endpointUrl(opts.baseUrl);
   const modelOf = (): string => effectiveModel(opts.baseUrl, typeof opts.model === 'function' ? opts.model() : opts.model);
-  return {
-    async choose(req) {
-      const timeout = AbortSignal.timeout(opts.timeoutMs);
-      const signal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
-      let res: Response;
+
+  /** POST one System One body; the parsed JSON plus the call's cost. */
+  async function post(body: Record<string, unknown>, callerSignal?: AbortSignal): Promise<{ json: unknown; costUsd?: number }> {
+    const timeout = AbortSignal.timeout(opts.timeoutMs);
+    const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
+    let res: Response;
+    try {
+      res = await doFetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (err) {
+      throw new JevError(`request failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!res.ok) {
+      let reason: string | undefined;
       try {
-        res = await doFetch(url, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildRequestBody(req, modelOf())),
-          signal,
-        });
-      } catch (err) {
-        throw new JevError(`request failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      if (!res.ok) {
-        // never echo the body's text: it may quote the request
-        let reason: string | undefined;
-        try {
-          reason = errorReason(await res.json());
-        } catch {
-          reason = undefined;
-        }
-        throw new JevError(
-          `HTTP ${res.status}${reason !== undefined ? ` (${reason})` : ''}`,
-          res.status,
-          retryAfterMs(res.headers.get('retry-after')),
-        );
-      }
-      let body: unknown;
-      try {
-        body = await res.json();
+        reason = errorReason(await res.json());
       } catch {
-        throw new JevError('response is not JSON');
+        reason = undefined;
       }
-      const result = parseChoiceAnswer(req, body);
-      const cost = Number(res.headers.get('x-cost-usd'));
-      return { ...result, ...(Number.isFinite(cost) && res.headers.get('x-cost-usd') !== null ? { costUsd: cost } : {}) };
+      throw new JevError(
+        `HTTP ${res.status}${reason !== undefined ? ` (${reason})` : ''}`,
+        res.status,
+        retryAfterMs(res.headers.get('retry-after')),
+      );
+    }
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      throw new JevError('response is not JSON');
+    }
+    const costHeader = res.headers.get('x-cost-usd');
+    const cost = Number(costHeader);
+    return { json, ...(costHeader !== null && Number.isFinite(cost) ? { costUsd: cost } : {}) };
+  }
+
+  return {
+    async decideAll(req) {
+      const { json, costUsd } = await post(buildBatchBody(req, modelOf()), req.signal);
+      return { ...parseBatchAnswers(req, json), ...(costUsd !== undefined ? { costUsd } : {}) };
+    },
+    async choose(req) {
+      const { json, costUsd } = await post(buildRequestBody(req, modelOf()), req.signal);
+      return { ...parseChoiceAnswer(req, json), ...(costUsd !== undefined ? { costUsd } : {}) };
     },
   };
 }

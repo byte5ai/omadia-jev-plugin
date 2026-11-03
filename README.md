@@ -2,15 +2,18 @@
 
 [TypeSafe AI's Jev](https://typesafe.ai) as the omadia **decision model** (`decisionModel@1`).
 
-Jev is a "System One" model: it does not write text. It returns a typed decision with a calibrated confidence. Installed in omadia, it decides every chat message **before any language-model call**:
+Jev is a "System One" model: it does not write text. It returns a typed decision with a calibrated confidence, and it evaluates every question of a request in parallel. Installed in omadia, it decides every chat message **before any language-model call**, in a single request:
 
 1. **Gate.** Does the message need a language model? If yes, it goes straight to the agent with a simple/complex hint, and the fast path makes no model call at all.
 2. **Source.** If no, which data source answers it? That can be any read tool the agent offers: a plugin tool, an API-backed tool, or an MCP tool its server marks read-only.
-3. **Direct plan.** Does a learned query fit as stored? If so, it runs without any model call. This only happens while a Privacy Shield runs, and only for messages without numbers or masked personal data.
+3. **Direct plan.** Does a learned query fit, and which part of the message fills its placeholders (a customer name, an e-mail)? If so, it runs without any model call. This only happens while a Privacy Shield runs, and only for messages without numbers.
+4. **Plan needed?** The plan-runner takes Jev's answer instead of asking a model of its own.
+
+Jev also decides which recalled notes are relevant, whether a turn is worth remembering, and, in the answer verifier, whether the evidence supports a claim. In every case the language model takes over when Jev is unsure or fails.
 
 If Jev fails, times out or is unsure, the fast path falls back to its usual model check, so the plugin can only save model calls, never lose answers. In the web chat, a badge on each answer shows what Jev decided.
 
-Requires omadia with `@omadia/plugin-api` >= 1.52.0 and `@omadia/fast-path` >= 0.2.0.
+Requires omadia with `@omadia/plugin-api` >= 1.53.0 and `@omadia/fast-path` >= 0.3.0 for the one-request gate (older hosts use the single decisions).
 
 ## Setup
 
@@ -20,7 +23,7 @@ Requires omadia with `@omadia/plugin-api` >= 1.52.0 and `@omadia/fast-path` >= 0
 | `jev_base_url` | `https://api.typesafe.ai` | Or a gateway (OpenRouter, LiteLLM, Zuplo), with or without `/v1`. |
 | `jev_model` | `jev-1.14.0` | Pinned on purpose. The fast path's thresholds are tuned per version. A gateway prefix (`jev/`) is dropped for api.typesafe.ai. |
 | `jev_timeout_ms` | `1500` | Keep it below the fast path's 2 s deadline. |
-| `jev_tasks` | `all` | `fast-path.gate`, `fast-path.source`, `fast-path.direct-plan`. Start with `fast-path.gate` for a careful rollout. |
+| `jev_tasks` | `all` | `fast-path.turn-gate` (the whole fast-path gate in one request), `recall.relevance`, `memory.significance`, `verifier.evidence-judge`, or the older single decisions `fast-path.gate` / `fast-path.source` / `fast-path.direct-plan`. |
 
 In the fast path's settings, `fast_path_decision_model` and `fast_path_decision_direct_plans` switch the use on and off.
 

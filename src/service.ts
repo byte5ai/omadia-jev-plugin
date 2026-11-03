@@ -1,5 +1,5 @@
-import type { DecisionChoiceRequest, DecisionChoiceResult, DecisionModelService } from './contract.js';
-import { JevError, type JevCallResult } from './jevClient.js';
+import type { DecisionBatchResult, DecisionChoiceResult, DecisionModelService } from './contract.js';
+import { JevError, type JevClient } from './jevClient.js';
 
 /**
  * The `decisionModel@1` service over a Jev client, with the guardrails a
@@ -21,7 +21,7 @@ export const BREAKER_COOLDOWN_MS = 30_000;
 export const ALL_TASKS = 'all';
 
 export interface JevServiceDeps {
-  client: { choose(req: DecisionChoiceRequest): Promise<JevCallResult> };
+  client: Pick<JevClient, 'choose'> & Partial<Pick<JevClient, 'decideAll'>>;
   /** `jev_tasks` — `all` or a comma list of task ids */
   tasks: string;
   log: (message: string) => void;
@@ -51,31 +51,54 @@ export function createJevDecisionService(deps: JevServiceDeps): DecisionModelSer
     deps.log(`[decision-jev] breaker open for ${Math.round(ms / 1000)} s (${why})`);
   }
 
+  /** One guarded call: task filter, breaker, one log line, failure accounting. */
+  async function guarded<T>(task: string, run: () => Promise<T>, describe: (r: T) => string): Promise<T> {
+    if (!allowed(task)) throw new JevError(`task ${task} not enabled (jev_tasks)`);
+    if (now() < openUntil) throw new JevError('circuit open');
+    const t0 = now();
+    try {
+      const result = await run();
+      failures = 0;
+      deps.log(`[decision-jev] task=${task} ${describe(result)} ms=${now() - t0}`);
+      return result;
+    } catch (err) {
+      const e = err instanceof JevError ? err : new JevError(err instanceof Error ? err.message : String(err));
+      deps.log(`[decision-jev] task=${task} failed ms=${now() - t0}: ${e.message}`);
+      if (e.status === 429) trip(e.retryAfterMs ?? BREAKER_COOLDOWN_MS, 'rate limited');
+      else if (e.status === 401 || e.status === 403) trip(BREAKER_COOLDOWN_MS * 10, `HTTP ${e.status} — check jev_api_key`);
+      else if (++failures >= BREAKER_FAILURES) trip(BREAKER_COOLDOWN_MS, `${BREAKER_FAILURES} failures in a row`);
+      throw e;
+    }
+  }
+
+  const tail = (model?: string, costUsd?: number): string =>
+    (model !== undefined ? ` model=${model}` : '') + (costUsd !== undefined ? ` cost_usd=${costUsd}` : '');
+
+  const client = deps.client;
+  const decideAll = client.decideAll?.bind(client);
   return {
     provider: PROVIDER_ID,
     async choose(req): Promise<DecisionChoiceResult> {
-      if (!allowed(req.task)) throw new JevError(`task ${req.task} not enabled (jev_tasks)`);
-      if (now() < openUntil) throw new JevError('circuit open');
-      const t0 = now();
-      try {
-        const result = await deps.client.choose(req);
-        failures = 0;
-        deps.log(
-          `[decision-jev] task=${req.task} choice=${result.choice} conf=${result.confidence.toFixed(2)} ` +
-            `ms=${now() - t0}` +
-            (result.model !== undefined ? ` model=${result.model}` : '') +
-            (result.costUsd !== undefined ? ` cost_usd=${result.costUsd}` : ''),
-        );
-        const { costUsd: _cost, ...decision } = result;
-        return decision;
-      } catch (err) {
-        const e = err instanceof JevError ? err : new JevError(err instanceof Error ? err.message : String(err));
-        deps.log(`[decision-jev] task=${req.task} failed ms=${now() - t0}: ${e.message}`);
-        if (e.status === 429) trip(e.retryAfterMs ?? BREAKER_COOLDOWN_MS, 'rate limited');
-        else if (e.status === 401 || e.status === 403) trip(BREAKER_COOLDOWN_MS * 10, `HTTP ${e.status} — check jev_api_key`);
-        else if (++failures >= BREAKER_FAILURES) trip(BREAKER_COOLDOWN_MS, `${BREAKER_FAILURES} failures in a row`);
-        throw e;
-      }
+      const result = await guarded(
+        req.task,
+        () => client.choose(req),
+        (r) => `choice=${r.choice} conf=${r.confidence.toFixed(2)}` + tail(r.model, r.costUsd),
+      );
+      const { costUsd: _cost, ...decision } = result;
+      return decision;
     },
+    ...(decideAll
+      ? {
+          async decideAll(req): Promise<DecisionBatchResult> {
+            const result = await guarded(
+              req.task,
+              () => decideAll(req),
+              (r) => `questions=${Object.keys(req.questions).length} answers=${Object.keys(r.answers).length}` + tail(r.model, r.costUsd),
+            );
+            const { costUsd: _cost, ...batch } = result;
+            return batch;
+          },
+        }
+      : {}),
   };
 }

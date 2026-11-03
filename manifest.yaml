@@ -3,7 +3,7 @@ schema_version: "1"
 identity:
   id: "@omadia/decision-jev"
   name: "Jev Decision Model (TypeSafe AI)"
-  version: "0.1.2"
+  version: "0.2.0"
   kind: "extension"
   domain: "core.decision"
   description:
@@ -72,8 +72,8 @@ setup:
         en: "Decisions Jev makes"
         de: "Entscheidungen durch Jev"
       help:
-        en: "Comma-separated: fast-path.gate (model yes/no), fast-path.source (which data source), fast-path.direct-plan (run a learned query as stored), or all. For a careful rollout start with fast-path.gate. Default: all"
-        de: "Kommagetrennt: fast-path.gate (Modell ja/nein), fast-path.source (welche Datenquelle), fast-path.direct-plan (gelernte Abfrage unverändert ausführen) oder all. Für einen vorsichtigen Start: fast-path.gate. Standard: all"
+        en: "Comma-separated: fast-path.turn-gate (every fast-path decision of a turn in ONE request — model yes/no, simple/complex, plan needed, data source, learned query with its values), recall.relevance, memory.significance, verifier.evidence-judge, the older single decisions fast-path.gate / fast-path.source / fast-path.direct-plan, or all. Default: all"
+        de: "Kommagetrennt: fast-path.turn-gate (alle Schnellpfad-Entscheidungen eines Turns in EINER Anfrage — Modell ja/nein, einfach/komplex, Plan nötig, Datenquelle, gelernte Abfrage samt Werten), recall.relevance, memory.significance, verifier.evidence-judge, die älteren Einzelentscheidungen fast-path.gate / fast-path.source / fast-path.direct-plan oder all. Standard: all"
       required: false
       default: "all"
 

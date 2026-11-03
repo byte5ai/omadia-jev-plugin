@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  buildBatchBody,
   buildRequestBody,
   createJevClient,
   effectiveModel,
@@ -9,6 +10,7 @@ import {
   errorReason,
   fallbackModel,
   JevError,
+  parseBatchAnswers,
   parseChoiceAnswer,
   retryAfterMs,
 } from '../src/jevClient.js';
@@ -227,7 +229,7 @@ describe('decision service — task filter and circuit breaker', () => {
     });
     const out = await svc.choose(REQ);
     assert.deepEqual(out, { choice: 'data', confidence: 0.93, model: 'jev-1.13.0' }, 'no cost on the contract result');
-    assert.match(logs[0] ?? '', /task=fast-path\.gate choice=data conf=0\.93 ms=\d+ model=jev-1\.13\.0 cost_usd=0\.000003/);
+    assert.match(logs[0] ?? '', /task=fast-path\.gate choice=data conf=0\.93 model=jev-1\.13\.0 cost_usd=0\.000003 ms=\d+/);
     assert.doesNotMatch(logs.join('\n'), /PERSON_1|offene Posten/);
   });
 });
@@ -320,3 +322,52 @@ describe('activation', () => {
     assert.equal(bodies[0]?.['model'], 'jev-latest');
   });
 });
+
+describe('batch (decideAll) — several questions, one request', () => {
+  const BATCH = {
+    task: 'fast-path.turn-gate',
+    input: 'USER TURN: offene Posten von Carrera',
+    questions: {
+      data: { kind: 'yesno' as const, instruction: 'Is it one read call?' },
+      source: { kind: 'choice' as const, instruction: 'Which source?', options: [{ id: 'tool:odoo_query', description: 'Odoo' }, { id: 'none', description: 'none' }] },
+    },
+  };
+
+  it('yes/no → Noul, choice → Choice, one state', () => {
+    assert.deepEqual(buildBatchBody(BATCH, 'jev-latest'), {
+      model: 'jev-latest',
+      state: BATCH.input,
+      questions: {
+        data: { type: 'noul', instructions: 'Is it one read call?' },
+        source: { type: 'choice', instructions: 'Which source?', criteria: { 'tool:odoo_query': 'Odoo', none: 'none' } },
+      },
+    });
+  });
+
+  it('parses noul probabilities and choices; invalid answers are dropped, not guessed', () => {
+    const r = parseBatchAnswers(BATCH, {
+      model: 'jev-1.14.0',
+      answers: {
+        data: { type: 'noul', noul: 0.91 },
+        source: { type: 'choice', choice: 'tool:rogue', confidence: 0.99 },
+        extra: { type: 'noul', noul: 1 },
+      },
+    });
+    assert.deepEqual(r, { answers: { data: { kind: 'yesno', probability: 0.91 } }, model: 'jev-1.14.0' });
+  });
+
+  it('the client sends ONE request for the batch; the service guards it like choose', async () => {
+    const f = fakeFetch(() =>
+      json({ model: 'jev-1.14.0', answers: { data: { type: 'noul', noul: 0.8 }, source: { type: 'choice', choice: 'tool:odoo_query', confidence: 0.9 } } }),
+    );
+    const client = createJevClient({ baseUrl: 'https://api.typesafe.ai', apiKey: 'k', model: 'jev-latest', timeoutMs: 1000, fetch: f.fetch });
+    const logs: string[] = [];
+    const svc = createJevDecisionService({ client, tasks: 'fast-path.turn-gate', log: (m) => logs.push(m) });
+    const out = await svc.decideAll?.(BATCH);
+    assert.equal(f.calls.length, 1);
+    assert.deepEqual(out?.answers['source'], { kind: 'choice', choice: 'tool:odoo_query', confidence: 0.9 });
+    assert.match(logs[0] ?? '', /task=fast-path\.turn-gate questions=2 answers=2 model=jev-1\.14\.0 ms=\d+/);
+    await assert.rejects(createJevDecisionService({ client, tasks: 'fast-path.gate', log: () => {} }).decideAll!(BATCH), /not enabled/);
+  });
+});
+
