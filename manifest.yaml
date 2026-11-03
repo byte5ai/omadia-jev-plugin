@@ -3,7 +3,7 @@ schema_version: "1"
 identity:
   id: "@omadia/decision-jev"
   name: "Jev Decision Model (TypeSafe AI)"
-  version: "0.2.0"
+  version: "0.2.1"
   kind: "extension"
   domain: "core.decision"
   description:
@@ -72,8 +72,8 @@ setup:
         en: "Decisions Jev makes"
         de: "Entscheidungen durch Jev"
       help:
-        en: "Comma-separated: fast-path.turn-gate (every fast-path decision of a turn in ONE request — model yes/no, simple/complex, plan needed, data source, learned query with its values), recall.relevance, memory.significance, verifier.evidence-judge, the older single decisions fast-path.gate / fast-path.source / fast-path.direct-plan, or all. Default: all"
-        de: "Kommagetrennt: fast-path.turn-gate (alle Schnellpfad-Entscheidungen eines Turns in EINER Anfrage — Modell ja/nein, einfach/komplex, Plan nötig, Datenquelle, gelernte Abfrage samt Werten), recall.relevance, memory.significance, verifier.evidence-judge, die älteren Einzelentscheidungen fast-path.gate / fast-path.source / fast-path.direct-plan oder all. Standard: all"
+        en: "Comma-separated: fast-path.turn-gate (every fast-path decision of a turn in ONE request — model yes/no, simple/complex, plan needed, data source, learned query with its values), recall.relevance, memory.significance, verifier.evidence-judge, canvas.layout (table or bar/line/pie chart for planned rows on the canvas), the older single decisions fast-path.gate / fast-path.source / fast-path.direct-plan, or all. Default: all"
+        de: "Kommagetrennt: fast-path.turn-gate (alle Schnellpfad-Entscheidungen eines Turns in EINER Anfrage — Modell ja/nein, einfach/komplex, Plan nötig, Datenquelle, gelernte Abfrage samt Werten), recall.relevance, memory.significance, verifier.evidence-judge, canvas.layout (Tabelle oder Balken-/Linien-/Kreisdiagramm für geplante Zeilen auf dem Canvas), die älteren Einzelentscheidungen fast-path.gate / fast-path.source / fast-path.direct-plan oder all. Standard: all"
       required: false
       default: "all"
 

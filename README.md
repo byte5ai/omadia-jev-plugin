@@ -23,9 +23,9 @@ Requires omadia with `@omadia/plugin-api` >= 1.53.0 and `@omadia/fast-path` >= 0
 | `jev_base_url` | `https://api.typesafe.ai` | Or a gateway (OpenRouter, LiteLLM, Zuplo), with or without `/v1`. |
 | `jev_model` | `jev-1.14.0` | Pinned on purpose. The fast path's thresholds are tuned per version. A gateway prefix (`jev/`) is dropped for api.typesafe.ai. |
 | `jev_timeout_ms` | `1500` | Keep it below the fast path's 2 s deadline. |
-| `jev_tasks` | `all` | `fast-path.turn-gate` (the whole fast-path gate in one request), `recall.relevance`, `memory.significance`, `verifier.evidence-judge`, or the older single decisions `fast-path.gate` / `fast-path.source` / `fast-path.direct-plan`. |
+| `jev_tasks` | `all` | `fast-path.turn-gate` (the whole fast-path gate in one request), `recall.relevance`, `memory.significance`, `verifier.evidence-judge`, `canvas.layout` (table or bar/line/pie chart for planned rows on the canvas), or the older single decisions `fast-path.gate` / `fast-path.source` / `fast-path.direct-plan`. |
 
-In the fast path's settings, `fast_path_decision_model` and `fast_path_decision_direct_plans` switch the use on and off.
+In the fast path's settings, `fast_path_decision_model`, `fast_path_decision_direct_plans` and `fast_path_decision_canvas` (the canvas view and layout) switch the use on and off.
 
 ## Privacy
 
