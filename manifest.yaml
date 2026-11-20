@@ -3,8 +3,10 @@ schema_version: "1"
 identity:
   id: "@omadia/decision-jev"
   name: "Jev Decision Model (TypeSafe AI)"
-  version: "0.2.1"
-  kind: "extension"
+  version: "0.3.0"
+  # Spec 2042 §5.10: a model plugin. Only model plugins hold model
+  # credentials and talk to model APIs, and only the kernel calls them.
+  kind: "model"
   domain: "core.decision"
   description:
     en: "Decides every chat message before any language-model call, with TypeSafe AI's Jev: does it need a model at all, or does one data source (plugin, API or MCP tool) answer it — and does a learned query fit as stored? Simple lookups then run without a model; everything else goes straight to the agent. Faster and cheaper than the model check of the fast path; any failure falls back to it."
@@ -19,7 +21,7 @@ identity:
     - "ml"
 
 compat:
-  core: ">=1.0 <2.0"
+  core: ">=1.75.0 <2.0"
   node: ">=20"
 
 lifecycle:
@@ -86,7 +88,11 @@ permissions:
     writes: []
   network:
     outbound:
-      - "typesafe-jev"
+      # The TypeSafe API, and the host of a gateway set as base URL. Model
+      # endpoints are reachable only for model plugins; the kernel blocks
+      # them for every other plugin.
+      - "api.typesafe.ai"
+      - "$config.jev_base_url"
   filesystem:
     scratch: false
 
