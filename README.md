@@ -13,7 +13,7 @@ Jev also decides which recalled notes are relevant, whether a turn is worth reme
 
 If Jev fails, times out or is unsure, the fast path falls back to its usual model check, so the plugin can only save model calls, never lose answers. In the web chat, a badge on each answer shows what Jev decided.
 
-Requires omadia with `@omadia/plugin-api` >= 1.77.0 and `@omadia/fast-path` >= 0.3.0 for the one-request gate.
+Requires omadia with `@omadia/plugin-api` >= 1.78.0 and `@omadia/fast-path` >= 0.3.0 for the one-request gate.
 
 **A model plugin (kind `model`, since 0.3.0).** Jev is a model: the plugin holds the TypeSafe credentials and is the only plugin that talks to the TypeSafe API (`api.typesafe.ai`, or the host of the gateway set as base URL). Every other plugin reaches models only through omadia's model gateway (spec 2042 §5.10). Up to 0.2.x the plugin was of the retired kind `extension`.
 
